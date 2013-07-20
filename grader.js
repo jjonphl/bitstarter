@@ -25,6 +25,8 @@
 var fs = require('fs');
 var program = require('commander');
 var cheerio = require('cheerio');
+var rest = require('restler');
+var crypto = require('crypto');
 
 var HTMLFILE_DEFAULT = 'index.html';
 var CHECKSFILE_DEFAULT = 'checks.json';
@@ -63,14 +65,48 @@ var clone = function(fn) {
     return fn.bind({});
 };
 
+function checkMain(filename, checkConfig) {
+    var checkJSON = checkHTMLFile(filename, checkConfig);
+    var outJson = JSON.stringify(checkJSON, null, 4);
+    console.log(outJson);
+}
+
 if (require.main == module) {
     program
         .option('-c, --checks <check_file>', 'Path to checks.json', clone(assertFileExists), CHECKSFILE_DEFAULT)
-        .option('-f, --file <html_file>', 'Path to index.html', clone(assertFileExists), HTMLFILE_DEFAULT)
+        .option('-f, --file <html_file>', 'Path to html file', clone(assertFileExists))
+        .option('-u, --url <url>', 'URL to html file')
         .parse(process.argv);
-    var checkJSON = checkHTMLFile(program.file, program.checks);
-    var outJson = JSON.stringify(checkJSON, null, 4);
-    console.log(outJson);
+
+    if (program.url && program.file) {
+        console.error('Only one of --file or --url should be provided.');
+        return -1;
+    }
+
+    if (program.url) {
+        var filename = 'grader-' + crypto.randomBytes(4).readUInt32LE(0) + '.tmp';
+        rest.get(program.url).on('complete', function(result) {
+            if (result instanceof Error) {
+                console.error('Error: ' + result.message);
+                throw Error
+            } else {
+                fs.writeFile(filename, result, function(err) {
+                    if (err) {
+                        console.error('Error: ' + err.toString());
+                        throw err;
+                    }
+                });
+                checkMain(filename, program.checks)
+                fs.unlink(filename);
+            }
+        })
+
+    } else if (program.file) {
+        checkMain(program.file, program.checks)
+    } else {
+        console.error('No filename??');
+        return -1;
+    }
 } else {
     exports.checkHTMLFile = checkHTMLFile;
 }
